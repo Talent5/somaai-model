@@ -12,17 +12,9 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-<<<<<<< HEAD
-# Initialize the ScholarshipRecommender
-db_path = 'firebase-credentials.json'
-if not db_path:
-    logging.error("FIREBASE_CREDENTIALS environment variable not set.")
-    raise EnvironmentError("FIREBASE_CREDENTIALS environment variable is required")
-=======
 # Initialize the recommender
 db_path = 'firebase-credentials.json'
 scholarship_data_path = 'data/scholarships.csv'
->>>>>>> b696a9e (Update Procfile and requirements.txt, and add firebase-credentials.json)
 
 try:
     recommender = ScholarshipRecommender(db_path, scholarship_data_path)
