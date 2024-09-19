@@ -17,11 +17,7 @@ if not db_path:
     raise EnvironmentError("FIREBASE_CREDENTIALS environment variable is required")
 
 try:
-<<<<<<< HEAD
-    scholarship_data_path = pd.read_csv('./data/scholaships.csv')
-=======
     scholarship_data_path = pd.read_csv('./data/scholarships.csv')
->>>>>>> eb08640 (Update runtime.txt, .gitignore, and requirements.txt)
 except FileNotFoundError:
     logging.error("Scholarship data file not found.")
     raise FileNotFoundError("Scholarship data file is required")

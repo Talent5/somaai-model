@@ -4,8 +4,4 @@ scikit-learn==1.3.1
 firebase-admin==6.1.0
 Flask==2.3.3
 gunicorn==21.1.0
-<<<<<<< HEAD
 apscheduler
-=======
-apscheduler
->>>>>>> eb08640 (Update runtime.txt, .gitignore, and requirements.txt)
