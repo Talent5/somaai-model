@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 app = Flask(__name__)
 
 # Initialize the ScholarshipRecommender
-db_path = os.environ.get('FIREBASE_CREDENTIALS')
+db_path = 'firebase-credentials.json'
 if not db_path:
     logging.error("FIREBASE_CREDENTIALS environment variable not set.")
     raise EnvironmentError("FIREBASE_CREDENTIALS environment variable is required")
