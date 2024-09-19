@@ -1,8 +1,10 @@
 import os
+import pandas as pd
 import logging
 from flask import Flask, jsonify
 from scholarship_recommender import ScholarshipRecommender
 from apscheduler.schedulers.background import BackgroundScheduler
+from flask import abort
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -10,11 +12,24 @@ app = Flask(__name__)
 
 # Initialize the ScholarshipRecommender
 db_path = os.environ.get('FIREBASE_CREDENTIALS')
-scholarship_data_path = os.environ.get('SCHOLARSHIP_DATA_PATH')
+if not db_path:
+    logging.error("FIREBASE_CREDENTIALS environment variable not set.")
+    raise EnvironmentError("FIREBASE_CREDENTIALS environment variable is required")
+
+try:
+    scholarship_data_path = pd.read_csv('./data/scholaships.csv')
+except FileNotFoundError:
+    logging.error("Scholarship data file not found.")
+    raise FileNotFoundError("Scholarship data file is required")
+
 recommender = ScholarshipRecommender(db_path, scholarship_data_path)
 
 def update_recommendations():
-    recommender.process_users()
+    try:
+        recommender.process_users()
+        logging.info("Recommendations updated successfully.")
+    except Exception as e:
+        logging.error(f"Error updating recommendations: {e}")
 
 # Set up scheduler
 scheduler = BackgroundScheduler()
@@ -27,13 +42,21 @@ def home():
 
 @app.route('/update', methods=['POST'])
 def manual_update():
-    recommender.process_users()
-    return jsonify({"status": "success", "message": "Recommendations updated"}), 200
+    try:
+        recommender.process_users()
+        return jsonify({"status": "success", "message": "Recommendations updated"}), 200
+    except Exception as e:
+        logging.error(f"Error in manual update: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/test/<user_id>')
 def test_user(user_id):
-    recommender.test_single_user(user_id)
-    return jsonify({"status": "success", "message": f"Tested recommendations for user {user_id}"}), 200
+    try:
+        recommender.test_single_user(user_id)
+        return jsonify({"status": "success", "message": f"Tested recommendations for user {user_id}"}), 200
+    except Exception as e:
+        logging.error(f"Error testing user {user_id}: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))
