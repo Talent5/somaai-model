@@ -2,6 +2,9 @@ __pycache__
 *.pyc
 .env
 venv/
+<<<<<<< HEAD
 *.csv
+=======
+>>>>>>> eb08640 (Update runtime.txt, .gitignore, and requirements.txt)
 .venv
 myenv/
