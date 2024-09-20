@@ -75,7 +75,7 @@ class ScholarshipRecommender:
             bool: True if all models exist, False otherwise.
         """
         return all(os.path.exists(os.path.join(self.model_dir, f)) for f in 
-                ['scholarships.joblib', 'feature_matrix.joblib', 'tfidf.joblib', 
+                   ['scholarships.joblib', 'feature_matrix.joblib', 'tfidf.joblib', 
                     'svd.joblib', 'scaler.joblib', 'kmeans.joblib'])
 
     def _save_models(self):
@@ -100,7 +100,7 @@ class ScholarshipRecommender:
 
     def _load_and_clean_scholarships(self, file_path: str) -> pd.DataFrame:
         """Loads the scholarship data from a CSV file, cleans it,
-        and removes duplicates or very similar scholarships.
+           and removes duplicates or very similar scholarships.
 
         Args:
             file_path (str): Path to the scholarship data CSV file.
@@ -190,7 +190,7 @@ class ScholarshipRecommender:
 
     def _create_feature_matrix(self) -> Tuple[np.ndarray, TfidfVectorizer, TruncatedSVD, StandardScaler]:
         """Creates a numerical feature matrix from the scholarship data using TF-IDF, dimensionality reduction,
-        and feature scaling.
+           and feature scaling.
 
         Returns:
             Tuple[np.ndarray, TfidfVectorizer, TruncatedSVD, StandardScaler]: 
@@ -246,10 +246,10 @@ class ScholarshipRecommender:
         return cosine_similarity(user_vector_normalized, self.feature_matrix)[0]
 
     def find_matching_scholarships(self, user_profile: dict, 
-                                    min_score: float = 0.3,
-                                    top_n: int = 10, 
-                                    deadline_boost_days: int = 30,
-                                    diversity_factor: float = 0.5) -> list:
+                                     min_score: float = 0.3,
+                                     top_n: int = 10, 
+                                     deadline_boost_days: int = 30,
+                                     diversity_factor: float = 0.5) -> list:
         """Finds the best matching scholarships for a user based on similarity, 
         eligibility, deadline proximity, and diversity.
 
@@ -441,22 +441,96 @@ class ScholarshipRecommender:
         except Exception as e:
             logging.error(f"Error processing users: {str(e)}")
 
+    
     def get_user(self, user_id: str) -> dict:
-        """Retrieves a single user from the Firestore database.
+        try:
+            user_doc = self.db.collection('users').document(user_id).get()
+            if user_doc.exists:
+                logging.info(f"User retrieved: {user_id}")
+                return user_doc.to_dict()
+            else:
+                logging.warning(f"User not found: {user_id}")
+                return None
+        except Exception as e:
+            logging.error(f"Failed to get user: {e}")
+            return None 
+
+    def get_all_users(self) -> list:
+        try:
+            users_ref = self.db.collection('users')
+            users = [doc.to_dict() for doc in users_ref.stream()]
+            logging.info(f"Retrieved {len(users)} users.")
+            return users
+        except Exception as e:
+            logging.error(f"Failed to get all users: {e}")
+            return []
+
+    def get_all_recommendations(self) -> dict:
+        try:
+            recommendations_ref = self.db.collection('scholarship_recommendations')
+            all_recommendations = {doc.id: doc.to_dict() 
+                                   for doc in recommendations_ref.stream()}
+            logging.info(f"Retrieved recommendations for {len(all_recommendations)} users.")
+            return all_recommendations 
+        except Exception as e:
+            logging.error(f"Failed to get all recommendations: {e}")
+            return {} 
+
+    def process_users(self, min_score: float = 0.15) -> None:
+        """Processes all users from the database, generates recommendations, and saves them.
 
         Args:
-            user_id (str): The ID of the user to retrieve.
-
-        Returns:
-            dict: User data dictionary, or None if not found.
+            min_score (float, optional): Minimum score for a recommendation to be saved. Defaults to 0.15.
         """
         try:
-            user_ref = self.db.collection('users').document(user_id)
-            user = user_ref.get()
-            return user.to_dict() if user.exists else None
+            users = self.get_all_users()
+            total_users = len(users)
+            total_scholarships = 0
+            processed_users = 0
+
+            print(f"Processing recommendations for {total_users} users:")
+            print("-------------------------------------------------")
+
+            for user in users:
+                user_id = user.get('userId', 'Unknown')
+                first_name = user.get('firstName', 'Unknown')
+                last_name = user.get('lastName', 'Unknown')
+
+                matches = self.find_matching_scholarships(user, min_score=min_score)
+                num_matches = len(matches)
+                total_scholarships += num_matches 
+
+                self.save_recommendations(user_id, matches)
+
+                print(f"User: {first_name} {last_name}")
+                print(f"User ID: {user_id}")
+                print(f"Number of matched scholarships: {num_matches}")
+                print("-------------------------------------------------")
+
+                processed_users += 1
+
+            avg_scholarships = total_scholarships / total_users if total_users > 0 else 0
+
+            print("\nSummary:")
+            print(f"Total users processed: {processed_users}")
+            print(f"Total scholarships matched: {total_scholarships}")
+            print(f"Average scholarships per user: {avg_scholarships:.2f}")
+
         except Exception as e:
-            logging.error(f"Failed to get user {user_id} from Firebase: {str(e)}")
-            return None
+            logging.error(f"Error processing users: {str(e)}")
+
+    def get_all_users(self) -> list:
+        """Retrieves all user data from the Firestore database.
+
+        Returns:
+            list: List of user dictionaries.
+        """
+        try:
+            users_ref = self.db.collection('users')
+            return [doc.to_dict() for doc in users_ref.stream()]
+        except Exception as e:
+            logging.error(f"Failed to get users: {str(e)}")
+            return []
 
     def test_single_user(self, user_id: str, min_score: float = 0.3) -> None:
         """Tests the recommendation system for a single user ID.
@@ -481,28 +555,3 @@ class ScholarshipRecommender:
         except Exception as e:
             logging.error(f"Error testing single user: {str(e)}")
 
-    def run_continuously(self, interval_hours: int = 0.02):
-        """Runs the scholarship recommendation process periodically.
-
-        Args:
-            interval_hours (int, optional): Interval in hours to run the process. Defaults to 0.02.
-        """
-        def job():
-            """Job function to be scheduled."""
-            print(f"\nStarting recommendation update at {datetime.now()}")
-            self.process_users()
-            print(f"Finished recommendation update at {datetime.now()}")
-
-        # Schedule the job
-        schedule.every(interval_hours).hours.do(job)
-
-        print(f"Scheduler set to run every {interval_hours} hours.")
-        print("Press Ctrl+C to stop the program.")
-
-        # Run the job immediately for the first time
-        job()
-
-        # Keep the script running
-        while True:
-            schedule.run_pending()
-            time.sleep(1)
