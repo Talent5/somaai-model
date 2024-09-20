@@ -441,18 +441,22 @@ class ScholarshipRecommender:
         except Exception as e:
             logging.error(f"Error processing users: {str(e)}")
 
-    def get_all_users(self) -> list:
-        """Retrieves all user data from the Firestore database.
+    def get_user(self, user_id: str) -> dict:
+        """Retrieves a single user from the Firestore database.
+
+        Args:
+            user_id (str): The ID of the user to retrieve.
 
         Returns:
-            list: List of user dictionaries.
+            dict: User data dictionary, or None if not found.
         """
         try:
-            users_ref = self.db.collection('users')
-            return [doc.to_dict() for doc in users_ref.stream()]
+            user_ref = self.db.collection('users').document(user_id)
+            user = user_ref.get()
+            return user.to_dict() if user.exists else None
         except Exception as e:
-            logging.error(f"Failed to get users: {str(e)}")
-            return []
+            logging.error(f"Failed to get user {user_id} from Firebase: {str(e)}")
+            return None
 
     def test_single_user(self, user_id: str, min_score: float = 0.3) -> None:
         """Tests the recommendation system for a single user ID.
@@ -477,11 +481,11 @@ class ScholarshipRecommender:
         except Exception as e:
             logging.error(f"Error testing single user: {str(e)}")
 
-    def run_continuously(self, interval_hours: int = 24):
+    def run_continuously(self, interval_hours: int = 0.02):
         """Runs the scholarship recommendation process periodically.
 
         Args:
-            interval_hours (int, optional): Interval in hours to run the process. Defaults to 24.
+            interval_hours (int, optional): Interval in hours to run the process. Defaults to 0.02.
         """
         def job():
             """Job function to be scheduled."""

@@ -1,47 +1,80 @@
+import os
+from flask import Flask, jsonify
 from scholarship_recommender import ScholarshipRecommender
 import firebase_admin
-from firebase_admin import credentials, firestore
-import os
-from apscheduler.schedulers.background import BackgroundScheduler  # Import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
-from datetime import datetime
-from flask import Flask, jsonify  # Import Flask and jsonify
+from firebase_admin import credentials
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.interval import IntervalTrigger
 
-# Initialize Flask
 app = Flask(__name__)
 
-# Initialize Firebase (only once)
+# Initialize Firebase
 if not firebase_admin._apps:
-    cred = credentials.Certificate(os.environ['GOOGLE_APPLICATION_CREDENTIALS'])
+    firebase_config = {
+        'type': os.environ['FIREBASE_TYPE'],
+        'project_id': os.environ['FIREBASE_PROJECT_ID'],
+        'private_key_id': os.environ['FIREBASE_PRIVATE_KEY_ID'],
+        'private_key': os.environ['FIREBASE_PRIVATE_KEY'].replace('\\n', '\n'),  # Ensure newlines are properly formatted
+        'client_email': os.environ['FIREBASE_CLIENT_EMAIL'],
+        'client_id': os.environ['FIREBASE_CLIENT_ID'],
+        'auth_uri': os.environ['FIREBASE_AUTH_URI'],
+        'token_uri': os.environ['FIREBASE_TOKEN_URI'],
+        'auth_provider_x509_cert_url': os.environ['FIREBASE_AUTH_PROVIDER_X509_CERT_URL'],
+        'client_x509_cert_url': os.environ['FIREBASE_CLIENT_X509_CERT_URL'],
+    }
+    cred = credentials.Certificate(firebase_config)
     firebase_admin.initialize_app(cred)
-db = firestore.client()
 
-# Load the scholarship recommender
+# Initialize the recommender
 scholarship_data_path = './data/scholarships.csv'
-recommender = ScholarshipRecommender(db, scholarship_data_path, model_dir='./models')
+recommender = ScholarshipRecommender(
+    db_path=firebase_config,
+    scholarship_data_path=scholarship_data_path,
+    model_dir='./models'
+)
 
-def run_recommendations():
-    """Function to run the recommendation process."""
-    print(f"\nStarting recommendation update at {datetime.now()}")
-    recommender.process_users()
-    print(f"Finished recommendation update at {datetime.now()}")
-
-# Scheduling with APScheduler (use BackgroundScheduler)
-scheduler = BackgroundScheduler()  
-scheduler.add_job(run_recommendations, CronTrigger.from_crontab('0 0 * * *'))
+# Set up scheduler
+scheduler = BackgroundScheduler()
+scheduler.add_job(
+    func=recommender.process_users,
+    trigger=IntervalTrigger(hours=24),
+    id='scholarship_recommendation_job',
+    name='Generate scholarship recommendations every 24 hours',
+    replace_existing=True)
 scheduler.start()
 
-# Example Flask endpoint
-@app.route('/recommendations/<user_id>')
-def get_recommendations(user_id):
-    """
-    Endpoint to get recommendations for a specific user.
-    """
-    # TODO: Implement logic to retrieve recommendations for user_id from 
-    # the recommender or your data store.
-    recommendations = recommender.get_recommendations_for_user(user_id)  # Example 
-    return jsonify(recommendations) 
+@app.route('/')
+def home():
+    return "Scholarship Recommender is running!"
 
-# Run Flask app if script is run directly
+@app.route('/user/<user_id>')
+def user_data(user_id):
+    # Fetch and display user data
+    user = recommender.get_user(user_id)
+    if user:
+        return jsonify(user)  # Customize the response as needed
+    else:
+        return jsonify({'error': 'User not found'}), 404
+
+@app.route('/recommendations/all')
+def all_user_recommendations():
+    # Fetch and display recommendations for all users
+    all_recommendations = recommender.get_all_recommendations()  # Implement this method
+    return jsonify(all_recommendations)
+
+@app.route('/recommendations/<user_id>')
+def specific_user_recommendations(user_id):
+    # Fetch and display recommendations for a specific user
+    user = recommender.get_user(user_id)
+    if user:
+        matches = recommender.find_matching_scholarships(user)
+        return jsonify([{
+            'title': scholarship['title'],
+            'score': score
+        } for scholarship, score in matches])
+    else:
+        return jsonify({'error': 'User not found'}), 404
+
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=8000)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
