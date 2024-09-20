@@ -2,9 +2,7 @@ __pycache__
 *.pyc
 .env
 venv/
-<<<<<<< HEAD
-*.csv
-=======
->>>>>>> eb08640 (Update runtime.txt, .gitignore, and requirements.txt)
+*.json
 .venv
 myenv/
+firebase-credentials.json

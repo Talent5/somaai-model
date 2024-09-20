@@ -1,57 +1,47 @@
+from scholarship_recommender import ScholarshipRecommender
+import firebase_admin
+from firebase_admin import credentials, firestore
 import os
-import sys
-import logging
-from flask import Flask
-from recommender import ScholarshipRecommender
-import threading
-import time
+from apscheduler.schedulers.background import BackgroundScheduler  # Import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from datetime import datetime
+from flask import Flask, jsonify  # Import Flask and jsonify
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
+# Initialize Flask
 app = Flask(__name__)
 
-# Initialize the recommender
-db_path = 'firebase-credentials.json'
-scholarship_data_path = 'data/scholarships.csv'
+# Initialize Firebase (only once)
+if not firebase_admin._apps:
+    cred = credentials.Certificate(os.environ['GOOGLE_APPLICATION_CREDENTIALS'])
+    firebase_admin.initialize_app(cred)
+db = firestore.client()
 
-try:
-    recommender = ScholarshipRecommender(db_path, scholarship_data_path)
-    logger.info("ScholarshipRecommender initialized successfully")
-except Exception as e:
-    logger.error(f"Failed to initialize ScholarshipRecommender: {str(e)}")
-    sys.exit(1)
+# Load the scholarship recommender
+scholarship_data_path = './data/scholarships.csv'
+recommender = ScholarshipRecommender(db, scholarship_data_path, model_dir='./models')
 
-def update_recommendations_continuously():
-    while True:
-        try:
-            logger.info("Updating recommendations...")
-            recommender.process_users()
-            logger.info("Recommendations updated. Waiting for 60 seconds...")
-            time.sleep(60)  # Wait for 60 seconds
-        except Exception as e:
-            logger.error(f"Error in update_recommendations_continuously: {str(e)}")
-            time.sleep(60)  # Wait before retrying
+def run_recommendations():
+    """Function to run the recommendation process."""
+    print(f"\nStarting recommendation update at {datetime.now()}")
+    recommender.process_users()
+    print(f"Finished recommendation update at {datetime.now()}")
 
-@app.route('/')
-def home():
-    return "Scholarship Recommender is running!"
+# Scheduling with APScheduler (use BackgroundScheduler)
+scheduler = BackgroundScheduler()  
+scheduler.add_job(run_recommendations, CronTrigger.from_crontab('0 0 * * *'))
+scheduler.start()
 
-@app.route('/update_recommendations')
-def update_recommendations():
-    try:
-        recommender.process_users()
-        return "Recommendations updated successfully!"
-    except Exception as e:
-        logger.error(f"Error in update_recommendations: {str(e)}")
-        return f"Error updating recommendations: {str(e)}", 500
+# Example Flask endpoint
+@app.route('/recommendations/<user_id>')
+def get_recommendations(user_id):
+    """
+    Endpoint to get recommendations for a specific user.
+    """
+    # TODO: Implement logic to retrieve recommendations for user_id from 
+    # the recommender or your data store.
+    recommendations = recommender.get_recommendations_for_user(user_id)  # Example 
+    return jsonify(recommendations) 
 
+# Run Flask app if script is run directly
 if __name__ == '__main__':
-    # Start the continuous update process in a separate thread
-    update_thread = threading.Thread(target=update_recommendations_continuously)
-    update_thread.start()
-
-    # Start the Flask app
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(debug=True, host='0.0.0.0', port=8000)
