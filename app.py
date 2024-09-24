@@ -196,6 +196,8 @@ def generate_recommendations_for_user(user_id):
         logger.error(f"Error generating recommendations for user {user_id}: {str(e)}")
         return jsonify({'error': 'Failed to generate recommendations'}), 500
 
+# In app.py
+
 @app.route('/trigger-recommendations', methods=['POST'])
 def trigger_recommendations():
     try:
@@ -205,7 +207,11 @@ def trigger_recommendations():
             # Trigger recommendation generation for the new user
             user_id = data.get('userId')
             if user_id:
-                recommender.generate_recommendations_for_user(user_id)
+                user = recommender.get_user(user_id)
+                if not user:
+                    return jsonify({'error': 'User not found'}), 404
+                matches = recommender.find_matching_scholarships(user)
+                recommender.save_recommendations(user_id, matches)
                 return jsonify({'message': f'Recommendations generated for new user {user_id}'}), 200
             else:
                 return jsonify({'error': 'userId is required'}), 400
@@ -213,7 +219,11 @@ def trigger_recommendations():
             # Trigger recommendation generation for the user who updated their profile
             user_id = data.get('userId')
             if user_id:
-                recommender.generate_recommendations_for_user(user_id)
+                user = recommender.get_user(user_id)
+                if not user:
+                    return jsonify({'error': 'User not found'}), 404
+                matches = recommender.find_matching_scholarships(user)
+                recommender.save_recommendations(user_id, matches)
                 return jsonify({'message': f'Recommendations generated for user {user_id}'}), 200
             else:
                 return jsonify({'error': 'userId is required'}), 400
