@@ -322,3 +322,13 @@ class ScholarshipRecommender:
         except Exception as e:
             logging.error(f"Failed to get recommendations for user {user_id}: {str(e)}")
             return None
+
+    def get_all_recommendations(self) -> dict:
+        """Retrieves all scholarship recommendations from Firestore."""
+        try:
+            recommendations_ref = self.db.collection('scholarship_recommendations').stream()
+            all_recommendations = {doc.id: doc.to_dict() for doc in recommendations_ref}
+            return all_recommendations
+        except Exception as e:
+            logging.error(f"Failed to get all recommendations: {str(e)}")
+            return {}
