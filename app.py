@@ -1,7 +1,6 @@
 import os
 import logging
-import json
-from flask import Flask, jsonify, request, make_response
+from flask import Flask, jsonify, request
 from scholarship_recommender import ScholarshipRecommender
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -99,77 +98,78 @@ def home():
 
 # --- User Endpoints ---
 
-@app.route('/users', methods=['POST'])
-def create_user():
-    """Create a new user."""
-    try:
-        data = request.get_json()
-        user_id = data.get('userId')  
-        if not user_id:
-            return jsonify({'error': 'userId is required'}), 400
+@app.route('/users', methods=['GET', 'POST'])
+def handle_users():
+    """Handles GET (fetch all users) and POST (create user) requests for users."""
+    if request.method == 'GET':
+        try:
+            users = recommender.get_all_users()
+            return jsonify(users), 200
+        except Exception as e:
+            logger.error(f"Error fetching users: {str(e)}")
+            return jsonify({'error': 'Failed to fetch users'}), 500
+    elif request.method == 'POST':
+        try:
+            data = request.get_json()
+            user_id = data.get('userId')
+            if not user_id:
+                return jsonify({'error': 'userId is required'}), 400
 
-        # Check if user already exists
-        existing_user = _get_user_data(user_id)
-        if existing_user:
-            return jsonify({'error': 'User already exists'}), 400
+            existing_user = _get_user_data(user_id)
+            if existing_user:
+                return jsonify({'error': 'User already exists'}), 400
 
-        db.collection('users').document(user_id).set(data)
-        logger.info(f"Created new user: {user_id}")
-        return jsonify({'message': 'User created successfully', 'userId': user_id}), 201
-    except Exception as e:
-        logger.error(f"Error creating user: {str(e)}")
-        return jsonify({'error': 'Failed to create user'}), 500
+            db.collection('users').document(user_id).set(data)
+            logger.info(f"Created new user: {user_id}")
+            return jsonify({'message': 'User created successfully', 'userId': user_id}), 201
+        except Exception as e:
+            logger.error(f"Error creating user: {str(e)}")
+            return jsonify({'error': 'Failed to create user'}), 500
 
-@app.route('/users/<string:user_id>', methods=['GET'])
-def get_user(user_id):
-    """Get a specific user."""
-    try:
-        user = _get_user_data(user_id)
-        if user:
-            return jsonify(user), 200
-        else:
-            return jsonify({'error': 'User not found'}), 404
-    except Exception as e:
-        logger.error(f"Error fetching user {user_id}: {str(e)}")
-        return jsonify({'error': 'Failed to fetch user'}), 500
-
-@app.route('/users/<string:user_id>', methods=['PUT'])
-def update_user(user_id):
-    """Update a user's profile."""
-    try:
-        data = request.get_json()
-        user_ref = db.collection('users').document(user_id)
-
-        if not user_ref.get().exists:
-            return jsonify({'error': 'User not found'}), 404
-
-        user_ref.update(data) 
-        logger.info(f"Updated user profile: {user_id}")
-        return jsonify({'message': 'User profile updated successfully'}), 200
-    except Exception as e:
-        logger.error(f"Error updating user {user_id}: {str(e)}")
-        return jsonify({'error': 'Failed to update user'}), 500
-
-@app.route('/users/<string:user_id>', methods=['DELETE'])
-def delete_user(user_id):
-    """Delete a user."""
+@app.route('/users/<string:user_id>', methods=['GET', 'PUT', 'DELETE'])
+def handle_user(user_id):
+    """Handles GET (fetch user), PUT (update user), and DELETE (delete user) requests."""
     try:
         user_ref = db.collection('users').document(user_id)
-        if not user_ref.get().exists:
-            return jsonify({'error': 'User not found'}), 404
 
-        user_ref.delete()
-        # You might also want to delete associated recommendations here
-        logger.info(f"Deleted user: {user_id}")
-        return jsonify({'message': 'User deleted successfully'}), 200
+        if request.method == 'GET':
+            user = _get_user_data(user_id)
+            if user:
+                return jsonify(user), 200
+            else:
+                return jsonify({'error': 'User not found'}), 404
+        elif request.method == 'PUT':
+            if not user_ref.get().exists:
+                return jsonify({'error': 'User not found'}), 404
+            data = request.get_json()
+            user_ref.update(data)
+            logger.info(f"Updated user profile: {user_id}")
+            return jsonify({'message': 'User profile updated successfully'}), 200
+        elif request.method == 'DELETE':
+            if not user_ref.get().exists:
+                return jsonify({'error': 'User not found'}), 404
+            user_ref.delete()
+            # You might also want to delete associated recommendations here
+            logger.info(f"Deleted user: {user_id}")
+            return jsonify({'message': 'User deleted successfully'}), 200
     except Exception as e:
-        logger.error(f"Error deleting user {user_id}: {str(e)}")
-        return jsonify({'error': 'Failed to delete user'}), 500
+        logger.error(f"Error handling user {user_id}: {str(e)}")
+        return jsonify({'error': 'Failed to handle user request'}), 500
 
 # --- Recommendation Endpoints ---
 
+@app.route('/recommendations', methods=['GET'])
+def get_all_recommendations():
+    """Get recommendations for all users."""
+    try:
+        all_recommendations = recommender.get_all_recommendations()
+        return jsonify(all_recommendations), 200
+    except Exception as e:
+        logger.error(f"Error fetching all recommendations: {str(e)}")
+        return jsonify({'error': 'Failed to fetch recommendations'}), 500
+
 @app.route('/users/<string:user_id>/recommendations', methods=['GET'])
-def get_recommendations(user_id):
+def get_recommendations_for_user(user_id):
     """Get recommendations for a specific user."""
     try:
         recommendations = recommender.get_recommendations_for_user(user_id)
