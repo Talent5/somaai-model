@@ -20,21 +20,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 class ScholarshipRecommender:
     """
-    This class handles the scholarship recommendation process.
-    It loads scholarship data, preprocesses it, builds a recommendation model,
-    and provides functionality to find and save scholarship recommendations for users.
+    Handles scholarship recommendations.
+    Loads data, preprocesses, builds model, and recommends scholarships.
     """
-
     def __init__(self, db: firestore.Client, scholarship_data_path: str, model_dir: str = 'models'):
-        """
-        Initializes the ScholarshipRecommender with database connection, data loading,
-        and model setup.
-
-        Args:
-            db (firestore.Client): Initialized Firestore client.
-            scholarship_data_path (str): Path to the CSV file containing scholarship data.
-            model_dir (str, optional): Directory to save/load models. Defaults to 'models'.
-        """
         self.db = db
         self.model_dir = model_dir
         if not os.path.exists(model_dir):
@@ -49,17 +38,13 @@ class ScholarshipRecommender:
             self._save_models()
 
     def _models_exist(self) -> bool:
-        """Checks if all model files exist in the specified directory.
-
-        Returns:
-            bool: True if all models exist, False otherwise.
-        """
+        """Checks if model files exist."""
         return all(os.path.exists(os.path.join(self.model_dir, f)) for f in
                    ['scholarships.joblib', 'feature_matrix.joblib', 'tfidf.joblib',
                     'svd.joblib', 'scaler.joblib', 'kmeans.joblib'])
 
     def _save_models(self):
-        """Saves the trained models to the specified directory."""
+        """Saves the trained models."""
         joblib.dump(self.scholarships, os.path.join(self.model_dir, 'scholarships.joblib'))
         joblib.dump(self.feature_matrix, os.path.join(self.model_dir, 'feature_matrix.joblib'))
         joblib.dump(self.tfidf, os.path.join(self.model_dir, 'tfidf.joblib'))
@@ -69,7 +54,7 @@ class ScholarshipRecommender:
         logging.info("Models saved successfully.")
 
     def _load_models(self):
-        """Loads the trained models from the specified directory."""
+        """Loads the trained models."""
         self.scholarships = joblib.load(os.path.join(self.model_dir, 'scholarships.joblib'))
         self.feature_matrix = joblib.load(os.path.join(self.model_dir, 'feature_matrix.joblib'))
         self.tfidf = joblib.load(os.path.join(self.model_dir, 'tfidf.joblib'))
@@ -79,15 +64,7 @@ class ScholarshipRecommender:
         logging.info("Models loaded successfully.")
 
     def _load_and_clean_scholarships(self, file_path: str) -> pd.DataFrame:
-        """Loads the scholarship data from a CSV file, cleans it,
-           and removes duplicates or very similar scholarships.
-
-        Args:
-            file_path (str): Path to the scholarship data CSV file.
-
-        Returns:
-            pd.DataFrame: Cleaned and de-duplicated scholarship data.
-        """
+        """Loads and cleans scholarship data, removing duplicates."""
         try:
             df = pd.read_csv(file_path)
             df = self._clean_scholarships(df)
@@ -99,23 +76,16 @@ class ScholarshipRecommender:
             raise
 
     def _clean_scholarships(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Performs data cleaning on the scholarship DataFrame.
-
-        Args:
-            df (pd.DataFrame): Raw scholarship data.
-
-        Returns:
-            pd.DataFrame: Cleaned scholarship data.
-        """
+        """Cleans the scholarship DataFrame."""
         def clean_text(text: str) -> str:
-            """Cleans text data by removing special characters and converting to lowercase."""
+            """Cleans text data."""
             if pd.isna(text):
                 return ''
             text = re.sub(r'[^\w\s]', ' ', str(text))
             return text.lower().strip()
 
         def parse_date(date_string):
-            """Parses date strings into datetime objects."""
+            """Parses date strings."""
             if pd.isna(date_string):
                 return pd.NaT
             date_formats = ['%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%B %d, %Y', '%d %B %Y', '%Y/%m/%d']
@@ -139,28 +109,18 @@ class ScholarshipRecommender:
         return df
 
     def _remove_duplicates_and_similar(self, df: pd.DataFrame, similarity_threshold: float = 0.95) -> pd.DataFrame:
-        """Removes duplicate and very similar scholarships based on their titles and descriptions.
-
-        Args:
-            df (pd.DataFrame): Scholarship DataFrame.
-            similarity_threshold (float, optional): Cosine similarity threshold for considering scholarships as duplicates.
-                                                    Defaults to 0.95.
-
-        Returns:
-            pd.DataFrame: De-duplicated scholarship DataFrame.
-        """
-        df = df.drop_duplicates()  # Drop exact duplicates first
+        """Removes duplicate and similar scholarships."""
+        df = df.drop_duplicates()
 
         tfidf = TfidfVectorizer(stop_words='english')
         tfidf_matrix = tfidf.fit_transform(df['title'] + ' ' + df['Description'])
         cosine_sim = cosine_similarity(tfidf_matrix)
-        distance_matrix = np.clip(1 - cosine_sim, 0, None)  # Convert similarity to distance
+        distance_matrix = np.clip(1 - cosine_sim, 0, None)
 
-        dbscan = DBSCAN(eps=1-similarity_threshold, min_samples=2, metric='precomputed')
+        dbscan = DBSCAN(eps=1 - similarity_threshold, min_samples=2, metric='precomputed')
         labels = dbscan.fit_predict(distance_matrix)
 
-        # Keep only one scholarship from each cluster (representing very similar scholarships)
-        unique_scholarships = df[labels == -1]  # Scholarships not in any cluster
+        unique_scholarships = df[labels == -1]
         for cluster in set(labels):
             if cluster != -1:
                 cluster_scholarships = df[labels == cluster]
@@ -169,48 +129,28 @@ class ScholarshipRecommender:
         return unique_scholarships.reset_index(drop=True)
 
     def _create_feature_matrix(self) -> Tuple[np.ndarray, TfidfVectorizer, TruncatedSVD, StandardScaler]:
-        """Creates a numerical feature matrix from the scholarship data using TF-IDF, dimensionality reduction,
-           and feature scaling.
-
-        Returns:
-            Tuple[np.ndarray, TfidfVectorizer, TruncatedSVD, StandardScaler]:
-                - Feature matrix (numpy array)
-                - Fitted TF-IDF vectorizer
-                - Fitted Truncated SVD model
-                - Fitted StandardScaler model
-        """
+        """Creates a numerical feature matrix."""
         features = ['field_of_study', 'location', 'university', 'About', 'Description',
                     'Applicable_programmes', 'Eligibility']
         tfidf = TfidfVectorizer(stop_words='english', max_features=5000)
         feature_matrix = tfidf.fit_transform(self.scholarships[features].apply(lambda x: ' '.join(x), axis=1))
 
-        svd = TruncatedSVD(n_components=100, random_state=42)  # Reduce dimensionality
+        svd = TruncatedSVD(n_components=100, random_state=42)
         feature_matrix_reduced = svd.fit_transform(feature_matrix)
 
-        scaler = StandardScaler()  # Scale features
+        scaler = StandardScaler()
         feature_matrix_normalized = scaler.fit_transform(feature_matrix_reduced)
 
         return feature_matrix_normalized, tfidf, svd, scaler
 
     def _cluster_scholarships(self) -> KMeans:
-        """Clusters the scholarships based on their feature vectors using K-Means clustering.
-
-        Returns:
-            KMeans: Fitted KMeans model.
-        """
-        kmeans = KMeans(n_clusters=10, n_init=10, random_state=42)  # You can adjust the number of clusters
+        """Clusters scholarships using KMeans."""
+        kmeans = KMeans(n_clusters=10, n_init=10, random_state=42)
         self.scholarships['cluster'] = kmeans.fit_predict(self.feature_matrix)
         return kmeans
 
     def calculate_similarity(self, user_profile: dict) -> np.ndarray:
-        """Calculates the cosine similarity between a user's profile and all scholarships.
-
-        Args:
-            user_profile (dict): User profile data.
-
-        Returns:
-            np.ndarray: Array of cosine similarity scores.
-        """
+        """Calculates cosine similarity between user and scholarships."""
         user_text = ' '.join([
             str(user_profile.get('intendedFieldOfStudy', '')),
             str(user_profile.get('preferredLocation', '')),
@@ -230,22 +170,7 @@ class ScholarshipRecommender:
                                      top_n: int = 10,
                                      deadline_boost_days: int = 30,
                                      diversity_factor: float = 0.5) -> list:
-        """Finds the best matching scholarships for a user based on similarity,
-        eligibility, deadline proximity, and diversity.
-
-        Args:
-            user_profile (dict): User profile data.
-            min_score (float, optional): Minimum similarity score for a scholarship to be considered.
-                                        Defaults to 0.3.
-            top_n (int, optional): Maximum number of recommendations to return. Defaults to 10.
-            deadline_boost_days (int, optional): Number of days before the deadline to apply a boost.
-                                                Defaults to 30.
-            diversity_factor (float, optional): Factor to promote diversity from different clusters.
-                                                Defaults to 0.5.
-
-        Returns:
-            list: List of tuples (scholarship, score), sorted by score in descending order.
-        """
+        """Finds matching scholarships based on similarity and eligibility."""
         similarities = self.calculate_similarity(user_profile)
 
         scores = []
@@ -253,11 +178,10 @@ class ScholarshipRecommender:
             scholarship = self.scholarships.iloc[idx]
 
             if not self._is_eligible(user_profile, scholarship):
-                continue  # Skip ineligible scholarships
+                continue
 
             score = similarity * self._calculate_attribute_match_score(user_profile, scholarship)
 
-            # Deadline Boost:
             deadline = scholarship.get('deadline')
             if deadline and isinstance(deadline, datetime):
                 days_until_deadline = (deadline - datetime.now()).days
@@ -265,12 +189,10 @@ class ScholarshipRecommender:
                     deadline_boost = 1 + (1 - days_until_deadline / deadline_boost_days)
                     score *= deadline_boost
 
-            scores.append((scholarship, score, idx))  # Store index for cluster diversity
+            scores.append((scholarship, score, idx))
 
-        # Sort by score (descending)
         scores.sort(key=lambda x: x[1], reverse=True)
 
-        # Apply Diversity: Prioritize scholarships from different clusters
         final_recommendations = []
         used_clusters = set()
         for scholarship, score, idx in scores:
@@ -279,60 +201,38 @@ class ScholarshipRecommender:
                 break
             if score < min_score:
                 continue
-            if cluster not in used_clusters or score > scores[0][1] * diversity_factor:  # Prioritize higher scores
+            if cluster not in used_clusters or score > scores[0][1] * diversity_factor:
                 final_recommendations.append((scholarship, score))
                 used_clusters.add(cluster)
 
         return final_recommendations
 
     def _calculate_attribute_match_score(self, user_profile: dict, scholarship: pd.Series) -> float:
-        """Calculates an additional score based on how well the scholarship attributes match the user profile.
-
-        Args:
-            user_profile (dict): User profile data.
-            scholarship (pd.Series): Scholarship data.
-
-        Returns:
-            float: Attribute match score (0 to 1).
-        """
+        """Calculates attribute match score."""
         match_score = 0
         total_weights = 0
 
-        # Field of Study (weight = 0.25)
         if user_profile.get('intendedFieldOfStudy') and user_profile['intendedFieldOfStudy'].lower() in scholarship['field_of_study'].lower():
             match_score += 0.25
             total_weights += 0.25
 
-        # Degree Type (weight = 0.20)
         if user_profile.get('degreeType') and user_profile['degreeType'].lower() in scholarship['Applicable_programmes'].lower():
             match_score += 0.20
             total_weights += 0.20
 
-        # Location (weight = 0.15)
         user_location = user_profile.get('preferredLocation', user_profile.get('countryName', ''))
         if user_location and user_location.lower() in scholarship['location'].lower():
             match_score += 0.15
             total_weights += 0.15
 
-        # Financial Need (weight = 0.15) - Adjust logic based on your data structure
         if user_profile.get('financialNeed', False) and 'need-based' in scholarship.get('scholarship_type', '').lower():
             match_score += 0.15
             total_weights += 0.15
 
-        # Normalize the score based on used weights:
         return match_score / total_weights if total_weights > 0 else 0.0
 
     def _is_eligible(self, user_profile: dict, scholarship: pd.Series) -> bool:
-        """Checks if the user meets the basic eligibility criteria of a scholarship.
-
-        Args:
-            user_profile (dict): User profile data.
-            scholarship (pd.Series): Scholarship data.
-
-        Returns:
-            bool: True if the user is eligible, False otherwise.
-        """
-        # Basic eligibility check based on education level and course of study
+        """Checks basic eligibility."""
         if scholarship['Eligibility']:
             eligibility_lower = scholarship['Eligibility'].lower()
             if user_profile.get('educationLevel', '').lower() not in eligibility_lower:
@@ -342,12 +242,7 @@ class ScholarshipRecommender:
         return True
 
     def save_recommendations(self, user_id: str, matches: list) -> None:
-        """Saves the scholarship recommendations for a user to the Firestore database.
-
-        Args:
-            user_id (str): The ID of the user.
-            matches (list): List of tuples (scholarship, score) representing the recommendations.
-        """
+        """Saves recommendations to Firestore."""
         try:
             existing_recommendations = self.db.collection('scholarship_recommendations').document(user_id).get().to_dict()
             existing_ids = {}
@@ -361,11 +256,11 @@ class ScholarshipRecommender:
                     'id': unique_id,
                     'title': scholarship.get('title', ''),
                     'deadline': str(scholarship.get('deadline', '')),
-                    'amount': scholarship.get('Grant', ''),  # Adjust field name if needed
+                    'amount': scholarship.get('Grant', ''),
                     'application_link': scholarship.get('application_link-href', ''),
                     'eligibility': scholarship.get('Eligibility', ''),
                     'description': scholarship.get('Description', ''),
-                    'application_process': scholarship.get('application_process', ''),  # Add if available
+                    'application_process': scholarship.get('application_process', ''),
                     'score': float(score),
                     'cluster': int(scholarship.get('cluster', -1))
                 })
@@ -379,11 +274,7 @@ class ScholarshipRecommender:
             logging.error(f"Failed to save recommendations for user {user_id}: {str(e)}")
 
     def process_users(self, min_score: float = 0.15) -> None:
-        """Processes all users from the database, generates recommendations, and saves them.
-
-        Args:
-            min_score (float, optional): Minimum score for a recommendation to be saved. Defaults to 0.15.
-        """
+        """Processes users, generates recommendations."""
         try:
             users = self.get_all_users()
             for user in users:
@@ -396,11 +287,7 @@ class ScholarshipRecommender:
             logging.error(f"Error processing users: {str(e)}")
 
     def get_all_users(self) -> List[dict]:
-        """Retrieves all user data from the Firestore database.
-
-        Returns:
-            List[dict]: List of user dictionaries.
-        """
+        """Retrieves all users from Firestore."""
         try:
             users_ref = self.db.collection('users')
             return [doc.to_dict() for doc in users_ref.stream()]
@@ -408,16 +295,21 @@ class ScholarshipRecommender:
             logging.error(f"Failed to get users: {str(e)}")
             return []
 
+    def get_user(self, user_id: str) -> Union[dict, None]:
+        """Retrieves a user from Firestore."""
+        try:
+            user_ref = self.db.collection('users').document(user_id)
+            user = user_ref.get()
+            if user.exists:
+                return user.to_dict()
+            else:
+                return None
+        except Exception as e:
+            logging.error(f"Failed to get user {user_id}: {str(e)}")
+            return None
+
     def get_recommendations_for_user(self, user_id: str) -> Union[dict, None]:
-        """Retrieves saved scholarship recommendations for a specific user from Firestore.
-
-        Args:
-            user_id (str): The ID of the user.
-
-        Returns:
-            Union[dict, None]: A dictionary containing the user's recommendations or None if
-                               no recommendations are found or an error occurs.
-        """
+        """Retrieves recommendations for a user."""
         try:
             recommendations_ref = self.db.collection('scholarship_recommendations').document(user_id)
             recommendations = recommendations_ref.get()
