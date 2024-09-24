@@ -52,7 +52,7 @@ except Exception as e:
 # --- Scheduler ---
 scheduler = BackgroundScheduler()
 
-@scheduler.scheduled_job(IntervalTrigger(hours=0.002))
+@scheduler.scheduled_job(IntervalTrigger(hours=24))
 def run_recommendation_job():
     """Generate and save recommendations for all users."""
     with app.app_context():
