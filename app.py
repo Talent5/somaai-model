@@ -196,6 +196,34 @@ def generate_recommendations_for_user(user_id):
         logger.error(f"Error generating recommendations for user {user_id}: {str(e)}")
         return jsonify({'error': 'Failed to generate recommendations'}), 500
 
+@app.route('/trigger-recommendations', methods=['POST'])
+def trigger_recommendations():
+    try:
+        data = request.get_json()
+        event = data.get('event')
+        if event == 'new-signup':
+            # Trigger recommendation generation for the new user
+            user_id = data.get('userId')
+            if user_id:
+                recommender.generate_recommendations_for_user(user_id)
+                return jsonify({'message': f'Recommendations generated for new user {user_id}'}), 200
+            else:
+                return jsonify({'error': 'userId is required'}), 400
+        elif event == 'profile-update':
+            # Trigger recommendation generation for the user who updated their profile
+            user_id = data.get('userId')
+            if user_id:
+                recommender.generate_recommendations_for_user(user_id)
+                return jsonify({'message': f'Recommendations generated for user {user_id}'}), 200
+            else:
+                return jsonify({'error': 'userId is required'}), 400
+        else:
+            return jsonify({'error': 'Invalid event type'}), 400
+    except Exception as e:
+        logger.error(f"Error handling recommendation trigger: {str(e)}")
+        return jsonify({'error': 'Failed to handle recommendation trigger'}), 500
+
+
 # --- Authentication Endpoint (Optional) ---
 
 @app.route('/login', methods=['POST'])
