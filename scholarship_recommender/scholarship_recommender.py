@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -9,35 +10,32 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import re
 from datetime import datetime, timedelta
-import schedule
-import time
 import joblib
-from typing import Tuple
+from typing import Tuple, List, Union
 import uuid
 import logging
-import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class ScholarshipRecommender:
     """
-    This class handles the scholarship recommendation process. 
-    It loads scholarship data, preprocesses it, builds a recommendation model, 
+    This class handles the scholarship recommendation process.
+    It loads scholarship data, preprocesses it, builds a recommendation model,
     and provides functionality to find and save scholarship recommendations for users.
     """
 
-    def __init__(self, db_path: str, scholarship_data_path: str, model_dir: str = 'models'):
+    def __init__(self, db: firestore.Client, scholarship_data_path: str, model_dir: str = 'models'):
         """
         Initializes the ScholarshipRecommender with database connection, data loading,
-        and model setup. 
+        and model setup.
 
         Args:
-            db_path (str): Path to the Firebase credentials JSON file.
+            db (firestore.Client): Initialized Firestore client.
             scholarship_data_path (str): Path to the CSV file containing scholarship data.
             model_dir (str, optional): Directory to save/load models. Defaults to 'models'.
         """
-        self.db = self._setup_firestore(db_path)
+        self.db = db
         self.model_dir = model_dir
         if not os.path.exists(model_dir):
             os.makedirs(model_dir)
@@ -50,32 +48,14 @@ class ScholarshipRecommender:
             self.kmeans = self._cluster_scholarships()
             self._save_models()
 
-    def _setup_firestore(self, db_path: str) -> firestore.Client:
-        """Establishes a connection to the Firestore database.
-
-        Args:
-            db_path (str): Path to the Firebase credentials JSON file.
-
-        Returns:
-            firestore.Client: Firestore client instance.
-        """
-        try:
-            if not firebase_admin._apps:
-                cred = credentials.Certificate(db_path)
-                firebase_admin.initialize_app(cred)
-            return firestore.client()
-        except Exception as e:
-            logging.error(f"Failed to set up Firestore: {str(e)}")
-            raise
-
     def _models_exist(self) -> bool:
         """Checks if all model files exist in the specified directory.
 
         Returns:
             bool: True if all models exist, False otherwise.
         """
-        return all(os.path.exists(os.path.join(self.model_dir, f)) for f in 
-                   ['scholarships.joblib', 'feature_matrix.joblib', 'tfidf.joblib', 
+        return all(os.path.exists(os.path.join(self.model_dir, f)) for f in
+                   ['scholarships.joblib', 'feature_matrix.joblib', 'tfidf.joblib',
                     'svd.joblib', 'scaler.joblib', 'kmeans.joblib'])
 
     def _save_models(self):
@@ -146,7 +126,7 @@ class ScholarshipRecommender:
                     continue
             return pd.NaT
 
-        text_columns = ['title', 'field_of_study', 'benefits', 'location', 'university', 
+        text_columns = ['title', 'field_of_study', 'benefits', 'location', 'university',
                         'About', 'Description', 'Applicable_programmes', 'Eligibility']
         for col in text_columns:
             if col in df.columns:
@@ -163,7 +143,7 @@ class ScholarshipRecommender:
 
         Args:
             df (pd.DataFrame): Scholarship DataFrame.
-            similarity_threshold (float, optional): Cosine similarity threshold for considering scholarships as duplicates. 
+            similarity_threshold (float, optional): Cosine similarity threshold for considering scholarships as duplicates.
                                                     Defaults to 0.95.
 
         Returns:
@@ -193,15 +173,15 @@ class ScholarshipRecommender:
            and feature scaling.
 
         Returns:
-            Tuple[np.ndarray, TfidfVectorizer, TruncatedSVD, StandardScaler]: 
+            Tuple[np.ndarray, TfidfVectorizer, TruncatedSVD, StandardScaler]:
                 - Feature matrix (numpy array)
                 - Fitted TF-IDF vectorizer
                 - Fitted Truncated SVD model
                 - Fitted StandardScaler model
         """
-        features = ['field_of_study', 'location', 'university', 'About', 'Description', 
+        features = ['field_of_study', 'location', 'university', 'About', 'Description',
                     'Applicable_programmes', 'Eligibility']
-        tfidf = TfidfVectorizer(stop_words='english', max_features=5000) 
+        tfidf = TfidfVectorizer(stop_words='english', max_features=5000)
         feature_matrix = tfidf.fit_transform(self.scholarships[features].apply(lambda x: ' '.join(x), axis=1))
 
         svd = TruncatedSVD(n_components=100, random_state=42)  # Reduce dimensionality
@@ -245,20 +225,20 @@ class ScholarshipRecommender:
         user_vector_normalized = self.scaler.transform(user_vector_reduced)
         return cosine_similarity(user_vector_normalized, self.feature_matrix)[0]
 
-    def find_matching_scholarships(self, user_profile: dict, 
+    def find_matching_scholarships(self, user_profile: dict,
                                      min_score: float = 0.3,
-                                     top_n: int = 10, 
+                                     top_n: int = 10,
                                      deadline_boost_days: int = 30,
                                      diversity_factor: float = 0.5) -> list:
-        """Finds the best matching scholarships for a user based on similarity, 
+        """Finds the best matching scholarships for a user based on similarity,
         eligibility, deadline proximity, and diversity.
 
         Args:
             user_profile (dict): User profile data.
-            min_score (float, optional): Minimum similarity score for a scholarship to be considered. 
+            min_score (float, optional): Minimum similarity score for a scholarship to be considered.
                                         Defaults to 0.3.
             top_n (int, optional): Maximum number of recommendations to return. Defaults to 10.
-            deadline_boost_days (int, optional): Number of days before the deadline to apply a boost. 
+            deadline_boost_days (int, optional): Number of days before the deadline to apply a boost.
                                                 Defaults to 30.
             diversity_factor (float, optional): Factor to promote diversity from different clusters.
                                                 Defaults to 0.5.
@@ -282,7 +262,7 @@ class ScholarshipRecommender:
             if deadline and isinstance(deadline, datetime):
                 days_until_deadline = (deadline - datetime.now()).days
                 if 0 <= days_until_deadline <= deadline_boost_days:
-                    deadline_boost = 1 + (1 - days_until_deadline / deadline_boost_days) 
+                    deadline_boost = 1 + (1 - days_until_deadline / deadline_boost_days)
                     score *= deadline_boost
 
             scores.append((scholarship, score, idx))  # Store index for cluster diversity
@@ -316,7 +296,7 @@ class ScholarshipRecommender:
             float: Attribute match score (0 to 1).
         """
         match_score = 0
-        total_weights = 0 
+        total_weights = 0
 
         # Field of Study (weight = 0.25)
         if user_profile.get('intendedFieldOfStudy') and user_profile['intendedFieldOfStudy'].lower() in scholarship['field_of_study'].lower():
@@ -387,7 +367,7 @@ class ScholarshipRecommender:
                     'description': scholarship.get('Description', ''),
                     'application_process': scholarship.get('application_process', ''),  # Add if available
                     'score': float(score),
-                    'cluster': int(scholarship.get('cluster', -1)) 
+                    'cluster': int(scholarship.get('cluster', -1))
                 })
 
             self.db.collection('scholarship_recommendations').document(user_id).set({
@@ -406,124 +386,20 @@ class ScholarshipRecommender:
         """
         try:
             users = self.get_all_users()
-            total_users = len(users)
-            total_scholarships = 0
-            processed_users = 0
-
-            print(f"Processing recommendations for {total_users} users:")
-            print("-------------------------------------------------")
-
             for user in users:
-                user_id = user.get('userId', 'Unknown')
-                first_name = user.get('firstName', 'Unknown')
-                last_name = user.get('lastName', 'Unknown')
-
-                matches = self.find_matching_scholarships(user, min_score=min_score)
-                num_matches = len(matches)
-                total_scholarships += num_matches 
-
-                self.save_recommendations(user_id, matches)
-
-                print(f"User: {first_name} {last_name}")
-                print(f"User ID: {user_id}")
-                print(f"Number of matched scholarships: {num_matches}")
-                print("-------------------------------------------------")
-
-                processed_users += 1
-
-            avg_scholarships = total_scholarships / total_users if total_users > 0 else 0
-
-            print("\nSummary:")
-            print(f"Total users processed: {processed_users}")
-            print(f"Total scholarships matched: {total_scholarships}")
-            print(f"Average scholarships per user: {avg_scholarships:.2f}")
-
+                user_id = user.get('userId')
+                if user_id:
+                    matches = self.find_matching_scholarships(user, min_score=min_score)
+                    self.save_recommendations(user_id, matches)
+                    logging.info(f"Recommendations generated and saved for user: {user_id}")
         except Exception as e:
             logging.error(f"Error processing users: {str(e)}")
 
-    
-    def get_user(self, user_id: str) -> dict:
-        try:
-            user_doc = self.db.collection('users').document(user_id).get()
-            if user_doc.exists:
-                logging.info(f"User retrieved: {user_id}")
-                return user_doc.to_dict()
-            else:
-                logging.warning(f"User not found: {user_id}")
-                return None
-        except Exception as e:
-            logging.error(f"Failed to get user: {e}")
-            return None 
-
-    def get_all_users(self) -> list:
-        try:
-            users_ref = self.db.collection('users')
-            users = [doc.to_dict() for doc in users_ref.stream()]
-            logging.info(f"Retrieved {len(users)} users.")
-            return users
-        except Exception as e:
-            logging.error(f"Failed to get all users: {e}")
-            return []
-
-    def get_all_recommendations(self) -> dict:
-        try:
-            recommendations_ref = self.db.collection('scholarship_recommendations')
-            all_recommendations = {doc.id: doc.to_dict() 
-                                   for doc in recommendations_ref.stream()}
-            logging.info(f"Retrieved recommendations for {len(all_recommendations)} users.")
-            return all_recommendations 
-        except Exception as e:
-            logging.error(f"Failed to get all recommendations: {e}")
-            return {} 
-
-    def process_users(self, min_score: float = 0.15) -> None:
-        """Processes all users from the database, generates recommendations, and saves them.
-
-        Args:
-            min_score (float, optional): Minimum score for a recommendation to be saved. Defaults to 0.15.
-        """
-        try:
-            users = self.get_all_users()
-            total_users = len(users)
-            total_scholarships = 0
-            processed_users = 0
-
-            print(f"Processing recommendations for {total_users} users:")
-            print("-------------------------------------------------")
-
-            for user in users:
-                user_id = user.get('userId', 'Unknown')
-                first_name = user.get('firstName', 'Unknown')
-                last_name = user.get('lastName', 'Unknown')
-
-                matches = self.find_matching_scholarships(user, min_score=min_score)
-                num_matches = len(matches)
-                total_scholarships += num_matches 
-
-                self.save_recommendations(user_id, matches)
-
-                print(f"User: {first_name} {last_name}")
-                print(f"User ID: {user_id}")
-                print(f"Number of matched scholarships: {num_matches}")
-                print("-------------------------------------------------")
-
-                processed_users += 1
-
-            avg_scholarships = total_scholarships / total_users if total_users > 0 else 0
-
-            print("\nSummary:")
-            print(f"Total users processed: {processed_users}")
-            print(f"Total scholarships matched: {total_scholarships}")
-            print(f"Average scholarships per user: {avg_scholarships:.2f}")
-
-        except Exception as e:
-            logging.error(f"Error processing users: {str(e)}")
-
-    def get_all_users(self) -> list:
+    def get_all_users(self) -> List[dict]:
         """Retrieves all user data from the Firestore database.
 
         Returns:
-            list: List of user dictionaries.
+            List[dict]: List of user dictionaries.
         """
         try:
             users_ref = self.db.collection('users')
@@ -532,26 +408,26 @@ class ScholarshipRecommender:
             logging.error(f"Failed to get users: {str(e)}")
             return []
 
-    def test_single_user(self, user_id: str, min_score: float = 0.3) -> None:
-        """Tests the recommendation system for a single user ID.
+    def get_recommendations_for_user(self, user_id: str) -> Union[dict, None]:
+        """Retrieves saved scholarship recommendations for a specific user from Firestore.
 
         Args:
             user_id (str): The ID of the user.
-            min_score (float, optional): Minimum score to consider a recommendation. Defaults to 0.3.
+
+        Returns:
+            Union[dict, None]: A dictionary containing the user's recommendations or None if
+                               no recommendations are found or an error occurs.
         """
         try:
-            user_ref = self.db.collection('users').document(user_id)
-            user = user_ref.get().to_dict()
-            if user:
-                matches = self.find_matching_scholarships(user, min_score=min_score)
-                logging.info(f"Top scholarship matches for {user.get('firstName', '')} {user.get('lastName', '')}:")
-                for scholarship, score in matches:
-                    logging.info(f"Title: {scholarship['title']}")
-                    logging.info(f"Score: {score:.2f}")
-                    # Log other relevant scholarship details here
-                    logging.info("---")
+            recommendations_ref = self.db.collection('scholarship_recommendations').document(user_id)
+            recommendations = recommendations_ref.get()
+
+            if recommendations.exists:
+                return recommendations.to_dict()
             else:
-                logging.warning(f"No user found with ID: {user_id}")
+                logging.info(f"No recommendations found for user: {user_id}")
+                return None
         except Exception as e:
-            logging.error(f"Error testing single user: {str(e)}")
+            logging.error(f"Failed to get recommendations for user {user_id}: {str(e)}")
+            return None
 
