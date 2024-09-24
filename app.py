@@ -5,7 +5,7 @@ import firebase_admin
 from firebase_admin import credentials
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-app = Flask(name)
+app = Flask(__name__)
 # Initialize Firebase
 if not firebase_admin._apps:
     firebase_config = {
