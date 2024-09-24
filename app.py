@@ -79,6 +79,21 @@ def specific_user_recommendations(user_id):
         } for scholarship, score in matches])
     else:
         return jsonify({'error': 'User not found'}), 404
-if name == 'main':
+@app.route('/generate_recommendations', methods=['POST'])
+def generate_recommendations():
+    try:
+        data = request.get_json()
+        user_id = data.get('user_id')
+        user = recommender.get_user(user_id)
+        if user:
+            matches = recommender.find_matching_scholarships(user)
+            recommender.save_recommendations(user_id, matches)
+            return jsonify({'message': 'Recommendations generated successfully'}), 200
+        else:
+            return jsonify({'error': 'User not found'}), 404
+    except Exception as e:
+        logger.error(f"Error generating recommendations for user {user_id}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
