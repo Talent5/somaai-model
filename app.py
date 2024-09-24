@@ -1,6 +1,7 @@
 import os
 import logging
-from flask import Flask, jsonify, request
+import json
+from flask import Flask, jsonify, request, make_response
 from scholarship_recommender import ScholarshipRecommender
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # --- Flask App ---
 app = Flask(__name__)
-app.config['JSON_SORT_KEYS'] = False 
+app.config['JSON_SORT_KEYS'] = False
 
 # --- Initialize Firebase ---
 try:
@@ -52,7 +53,7 @@ except Exception as e:
 # --- Scheduler ---
 scheduler = BackgroundScheduler()
 
-@scheduler.scheduled_job(IntervalTrigger(hours=24)) 
+@scheduler.scheduled_job(IntervalTrigger(hours=24))
 def run_recommendation_job():
     """Generate and save recommendations for all users."""
     with app.app_context():
@@ -64,7 +65,23 @@ def run_recommendation_job():
 scheduler.start()
 logger.info("Scheduler started.")
 
+# --- Helper Functions ---
+
+def _get_user_data(user_id: str) -> dict:
+    """Helper function to fetch user data from Firestore."""
+    user_ref = db.collection('users').document(user_id)
+    user_doc = user_ref.get()
+    if user_doc.exists:
+        return user_doc.to_dict()
+    else:
+        return None
+
 # --- Error Handling ---
+
+@app.errorhandler(400)
+def bad_request(e):
+    return jsonify({'error': 'Bad Request'}), 400
+
 @app.errorhandler(404)
 def resource_not_found(e):
     return jsonify({'error': 'Resource not found'}), 404
@@ -80,15 +97,76 @@ def internal_server_error(e):
 def home():
     return jsonify({"message": "Scholarship Recommender API is running!"}), 200
 
-@app.route('/users', methods=['GET'])
-def get_users():
-    """Get all users."""
+# --- User Endpoints ---
+
+@app.route('/users', methods=['POST'])
+def create_user():
+    """Create a new user."""
     try:
-        users = recommender.get_all_users()
-        return jsonify(users), 200
+        data = request.get_json()
+        user_id = data.get('userId')  
+        if not user_id:
+            return jsonify({'error': 'userId is required'}), 400
+
+        # Check if user already exists
+        existing_user = _get_user_data(user_id)
+        if existing_user:
+            return jsonify({'error': 'User already exists'}), 400
+
+        db.collection('users').document(user_id).set(data)
+        logger.info(f"Created new user: {user_id}")
+        return jsonify({'message': 'User created successfully', 'userId': user_id}), 201
     except Exception as e:
-        logger.error(f"Error fetching users: {str(e)}")
-        return jsonify({'error': 'Failed to fetch users'}), 500
+        logger.error(f"Error creating user: {str(e)}")
+        return jsonify({'error': 'Failed to create user'}), 500
+
+@app.route('/users/<string:user_id>', methods=['GET'])
+def get_user(user_id):
+    """Get a specific user."""
+    try:
+        user = _get_user_data(user_id)
+        if user:
+            return jsonify(user), 200
+        else:
+            return jsonify({'error': 'User not found'}), 404
+    except Exception as e:
+        logger.error(f"Error fetching user {user_id}: {str(e)}")
+        return jsonify({'error': 'Failed to fetch user'}), 500
+
+@app.route('/users/<string:user_id>', methods=['PUT'])
+def update_user(user_id):
+    """Update a user's profile."""
+    try:
+        data = request.get_json()
+        user_ref = db.collection('users').document(user_id)
+
+        if not user_ref.get().exists:
+            return jsonify({'error': 'User not found'}), 404
+
+        user_ref.update(data) 
+        logger.info(f"Updated user profile: {user_id}")
+        return jsonify({'message': 'User profile updated successfully'}), 200
+    except Exception as e:
+        logger.error(f"Error updating user {user_id}: {str(e)}")
+        return jsonify({'error': 'Failed to update user'}), 500
+
+@app.route('/users/<string:user_id>', methods=['DELETE'])
+def delete_user(user_id):
+    """Delete a user."""
+    try:
+        user_ref = db.collection('users').document(user_id)
+        if not user_ref.get().exists:
+            return jsonify({'error': 'User not found'}), 404
+
+        user_ref.delete()
+        # You might also want to delete associated recommendations here
+        logger.info(f"Deleted user: {user_id}")
+        return jsonify({'message': 'User deleted successfully'}), 200
+    except Exception as e:
+        logger.error(f"Error deleting user {user_id}: {str(e)}")
+        return jsonify({'error': 'Failed to delete user'}), 500
+
+# --- Recommendation Endpoints ---
 
 @app.route('/users/<string:user_id>/recommendations', methods=['GET'])
 def get_recommendations(user_id):
@@ -105,7 +183,7 @@ def get_recommendations(user_id):
 
 @app.route('/users/<user_id>/generate_recommendations', methods=['POST'])
 def generate_recommendations_for_user(user_id):
-    """Generate recommendations for a specific user."""
+    """Generate recommendations for a specific user on demand."""
     try:
         user = recommender.get_user(user_id)
         if not user:
@@ -118,8 +196,23 @@ def generate_recommendations_for_user(user_id):
         logger.error(f"Error generating recommendations for user {user_id}: {str(e)}")
         return jsonify({'error': 'Failed to generate recommendations'}), 500
 
+# --- Authentication Endpoint (Optional) ---
 
-# ... Add other API endpoints for user registration, profile updates, etc. ...
+@app.route('/login', methods=['POST'])
+def login_user():
+    """Login user (You should implement proper authentication here)."""
+    data = request.get_json()
+    user_id = data.get('userId')
+    password = data.get('password')
+
+    # **IMPORTANT:** Replace this placeholder with your actual authentication logic
+    # (e.g., using Firebase Authentication or another authentication system)
+
+    # Placeholder - Example using a hardcoded user
+    if user_id == 'testuser' and password == 'testpassword':
+        return jsonify({'message': 'Login successful', 'userId': user_id}), 200
+    else:
+        return jsonify({'error': 'Invalid credentials'}), 401
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))
