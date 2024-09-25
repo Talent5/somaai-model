@@ -1,11 +1,9 @@
 import os
 import logging
 from flask import Flask, jsonify, request
-from scholarship_recommender import ScholarshipRecommender
+from scholarship_recommender import ScholarshipRecommender  # Assuming this is your class
 import firebase_admin
 from firebase_admin import credentials, firestore
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.interval import IntervalTrigger
 
 # --- Configuration ---
 SCHOLARSHIP_DATA_PATH = './data/scholarships.csv'
@@ -49,23 +47,7 @@ except Exception as e:
     logger.error(f"Failed to initialize ScholarshipRecommender: {str(e)}")
     exit(1)
 
-# --- Scheduler ---
-scheduler = BackgroundScheduler()
-
-@scheduler.scheduled_job(IntervalTrigger(hours=24))
-def run_recommendation_job():
-    """Generate and save recommendations for all users."""
-    with app.app_context():
-        try:
-            recommender.process_users(min_score=0.15)
-        except Exception as e:
-            logger.error(f"Error in scheduled recommendation job: {str(e)}")
-
-scheduler.start()
-logger.info("Scheduler started.")
-
 # --- Helper Functions ---
-
 def _get_user_data(user_id: str) -> dict:
     """Helper function to fetch user data from Firestore."""
     user_ref = db.collection('users').document(user_id)
@@ -76,7 +58,6 @@ def _get_user_data(user_id: str) -> dict:
         return None
 
 # --- Error Handling ---
-
 @app.errorhandler(400)
 def bad_request(e):
     return jsonify({'error': 'Bad Request'}), 400
@@ -121,6 +102,17 @@ def handle_users():
 
             db.collection('users').document(user_id).set(data)
             logger.info(f"Created new user: {user_id}")
+
+            # Generate recommendations after user creation
+            try:
+                user = recommender.get_user(user_id)
+                matches = recommender.find_matching_scholarships(user)
+                recommender.save_recommendations(user_id, matches)
+                logger.info(f'Recommendations generated for new user: {user_id}')
+            except Exception as e:
+                logger.error(f"Error generating recommendations for user {user_id}: {str(e)}")
+                # You can choose to return an error or handle this silently
+
             return jsonify({'message': 'User created successfully', 'userId': user_id}), 201
         except Exception as e:
             logger.error(f"Error creating user: {str(e)}")
@@ -144,6 +136,17 @@ def handle_user(user_id):
             data = request.get_json()
             user_ref.update(data)
             logger.info(f"Updated user profile: {user_id}")
+
+            # Generate recommendations after user profile update
+            try:
+                user = recommender.get_user(user_id)
+                matches = recommender.find_matching_scholarships(user)
+                recommender.save_recommendations(user_id, matches)
+                logger.info(f'Recommendations generated for updated user: {user_id}')
+            except Exception as e:
+                logger.error(f"Error generating recommendations for user {user_id}: {str(e)}")
+                # You can choose to return an error or handle this silently
+
             return jsonify({'message': 'User profile updated successfully'}), 200
         elif request.method == 'DELETE':
             if not user_ref.get().exists:
@@ -155,6 +158,7 @@ def handle_user(user_id):
     except Exception as e:
         logger.error(f"Error handling user {user_id}: {str(e)}")
         return jsonify({'error': 'Failed to handle user request'}), 500
+
 
 # --- Recommendation Endpoints ---
 
@@ -181,76 +185,7 @@ def get_recommendations_for_user(user_id):
         logger.error(f"Error fetching recommendations for user {user_id}: {str(e)}")
         return jsonify({'error': 'Failed to fetch recommendations'}), 500
 
-@app.route('/users/<user_id>/generate_recommendations', methods=['POST'])
-def generate_recommendations_for_user(user_id):
-    """Generate recommendations for a specific user on demand."""
-    try:
-        user = recommender.get_user(user_id)
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-
-        matches = recommender.find_matching_scholarships(user)
-        recommender.save_recommendations(user_id, matches)
-        return jsonify({'message': f'Recommendations generated and saved for user {user_id}'}), 200
-    except Exception as e:
-        logger.error(f"Error generating recommendations for user {user_id}: {str(e)}")
-        return jsonify({'error': 'Failed to generate recommendations'}), 500
-
-# In app.py
-
-@app.route('/trigger-recommendations', methods=['POST'])
-def trigger_recommendations():
-    try:
-        data = request.get_json()
-        event = data.get('event')
-        if event == 'new-signup':
-            # Trigger recommendation generation for the new user
-            user_id = data.get('userId')
-            if user_id:
-                user = recommender.get_user(user_id)
-                if not user:
-                    return jsonify({'error': 'User not found'}), 404
-                matches = recommender.find_matching_scholarships(user)
-                recommender.save_recommendations(user_id, matches)
-                return jsonify({'message': f'Recommendations generated for new user {user_id}'}), 200
-            else:
-                return jsonify({'error': 'userId is required'}), 400
-        elif event == 'profile-update':
-            # Trigger recommendation generation for the user who updated their profile
-            user_id = data.get('userId')
-            if user_id:
-                user = recommender.get_user(user_id)
-                if not user:
-                    return jsonify({'error': 'User not found'}), 404
-                matches = recommender.find_matching_scholarships(user)
-                recommender.save_recommendations(user_id, matches)
-                return jsonify({'message': f'Recommendations generated for user {user_id}'}), 200
-            else:
-                return jsonify({'error': 'userId is required'}), 400
-        else:
-            return jsonify({'error': 'Invalid event type'}), 400
-    except Exception as e:
-        logger.error(f"Error handling recommendation trigger: {str(e)}")
-        return jsonify({'error': 'Failed to handle recommendation trigger'}), 500
-
-
-# --- Authentication Endpoint (Optional) ---
-
-@app.route('/login', methods=['POST'])
-def login_user():
-    """Login user (You should implement proper authentication here)."""
-    data = request.get_json()
-    user_id = data.get('userId')
-    password = data.get('password')
-
-    # **IMPORTANT:** Replace this placeholder with your actual authentication logic
-    # (e.g., using Firebase Authentication or another authentication system)
-
-    # Placeholder - Example using a hardcoded user
-    if user_id == 'testuser' and password == 'testpassword':
-        return jsonify({'message': 'Login successful', 'userId': user_id}), 200
-    else:
-        return jsonify({'error': 'Invalid credentials'}), 401
+# ... (Your other endpoints)
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))
