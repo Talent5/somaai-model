@@ -96,9 +96,6 @@ def handle_users():
             if not user_id:
                 return jsonify({'error': 'userId is required'}), 400
 
-            existing_user = _get_user_data(user_id)
-            if existing_user:
-                return jsonify({'error': 'User already exists'}), 400
 
             db.collection('users').document(user_id).set(data)
             logger.info(f"Created new user: {user_id}")
