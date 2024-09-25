@@ -52,7 +52,7 @@ except Exception as e:
 # --- Scheduler ---
 scheduler = BackgroundScheduler()
 
-@app.route('run')
+@app.route('/run')
 def run_recommendation_job():
     """Generate and save recommendations for all users."""
     with app.app_context():
