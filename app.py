@@ -2,6 +2,7 @@ import os
 import logging
 import time
 from flask import Flask, jsonify, request
+from flask_cors import CORS
 from scholarship_recommender import ScholarshipRecommender
 import firebase_admin
 from firebase_admin import credentials, firestore
