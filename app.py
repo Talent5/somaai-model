@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 # --- Flask App ---
 app = Flask(__name__)
+CORS(app)
 app.config['JSON_SORT_KEYS'] = False
 
 # --- Initialize Firebase ---
