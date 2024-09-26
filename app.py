@@ -1,5 +1,6 @@
 import os
 import logging
+import time
 from flask import Flask, jsonify, request
 from scholarship_recommender import ScholarshipRecommender
 import firebase_admin
@@ -51,19 +52,8 @@ except Exception as e:
 
 # --- Scheduler ---
 scheduler = BackgroundScheduler()
-
-@app.route('/run')
-def run_recommendation_job():
-    """Generate and save recommendations for all users."""
-    try:
-        users_processed = recommender.process_users(min_score=0.15)
-        return jsonify({
-            'message': 'Recommendation job completed successfully',
-            'users_processed': users_processed
-        }), 200
-    except Exception as e:
-        logger.error(f"Error in recommendation job: {str(e)}")
-        return jsonify({'error': 'Failed to run recommendation job'}), 500
+scheduler.start()
+logger.info("Scheduler started.")
 
 # --- Helper Functions ---
 
@@ -96,6 +86,42 @@ def internal_server_error(e):
 @app.route('/')
 def home():
     return jsonify({"message": "Scholarship Recommender API is running!"}), 200
+
+@app.route('/run')
+def run_recommendation_job():
+    """Generate and save recommendations for all users."""
+    try:
+        start_time = time.time()
+        users_processed = 0
+        
+        # Get all users
+        users = recommender.get_all_users()
+        
+        for user in users:
+            try:
+                user_id = user.get('userId')  # Adjust this if your user structure is different
+                if user_id:
+                    matches = recommender.find_matching_scholarships(user)
+                    recommender.save_recommendations(user_id, matches)
+                    users_processed += 1
+                    logger.info(f"Processed recommendations for user: {user_id}")
+                else:
+                    logger.warning(f"Skipped user due to missing userId: {user}")
+            except Exception as user_error:
+                logger.error(f"Error processing user: {user_error}")
+        
+        end_time = time.time()
+        execution_time = end_time - start_time
+        
+        return jsonify({
+            'message': 'Recommendation job completed successfully',
+            'users_processed': users_processed,
+            'total_users': len(users),
+            'execution_time_seconds': round(execution_time, 2)
+        }), 200
+    except Exception as e:
+        logger.error(f"Error in recommendation job: {str(e)}")
+        return jsonify({'error': 'Failed to run recommendation job', 'details': str(e)}), 500
 
 # --- User Endpoints ---
 
