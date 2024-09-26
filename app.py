@@ -55,14 +55,15 @@ scheduler = BackgroundScheduler()
 @app.route('/run')
 def run_recommendation_job():
     """Generate and save recommendations for all users."""
-    with app.app_context():
-        try:
-            recommender.process_users(min_score=0.15)
-        except Exception as e:
-            logger.error(f"Error in scheduled recommendation job: {str(e)}")
-
-scheduler.start()
-logger.info("Scheduler started.")
+    try:
+        users_processed = recommender.process_users(min_score=0.15)
+        return jsonify({
+            'message': 'Recommendation job completed successfully',
+            'users_processed': users_processed
+        }), 200
+    except Exception as e:
+        logger.error(f"Error in recommendation job: {str(e)}")
+        return jsonify({'error': 'Failed to run recommendation job'}), 500
 
 # --- Helper Functions ---
 
